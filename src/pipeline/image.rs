@@ -4,7 +4,7 @@ use std::ptr::copy_nonoverlapping as memcpy;
 
 use vulkanalia::{
     Device, Instance,
-    vk::{self, DeviceV1_0, HasBuilder},
+    vk::{self, DeviceV1_0, HasBuilder, InstanceV1_0},
 };
 
 use crate::{
@@ -88,6 +88,8 @@ pub unsafe fn create_texture_image(
     memcpy(pixels.as_ptr(), memory.cast(), pixels.len());
     device.unmap_memory(staging_buffer_memory);
 
+    println!("here");
+
     // create the vulkan image object to store the image data
     let (texture_image, texture_image_memory) = create_image(
         instance,
@@ -100,6 +102,9 @@ pub unsafe fn create_texture_image(
         vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
+
+    data.texture_image = texture_image;
+    data.texture_image_memory = texture_image_memory;
 
     transition_image_layout(
         device,
@@ -127,9 +132,6 @@ pub unsafe fn create_texture_image(
         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
     )?;
-
-    data.texture_image = texture_image;
-    data.texture_image_memory = texture_image_memory;
 
     device.destroy_buffer(staging_buffer, None);
     device.free_memory(staging_buffer_memory, None);
@@ -235,4 +237,120 @@ pub unsafe fn transition_image_layout(
     end_onetime_command(device, data, command_buffer)?;
 
     Ok(())
+}
+
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
+pub unsafe fn create_image_view(
+    device: &Device,
+    image: vk::Image,
+    format: vk::Format,
+    aspects: vk::ImageAspectFlags,
+) -> Result<vk::ImageView> {
+    let subresource_range = vk::ImageSubresourceRange::builder()
+        .aspect_mask(aspects)
+        .base_mip_level(0)
+        .level_count(1)
+        .base_array_layer(0)
+        .layer_count(1);
+
+    let info = vk::ImageViewCreateInfo::builder()
+        .image(image)
+        .view_type(vk::ImageViewType::_2D)
+        .format(format)
+        .subresource_range(subresource_range);
+
+    Ok(unsafe { device.create_image_view(&info, None)? })
+}
+
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
+pub unsafe fn get_supported_format(
+    instance: &Instance,
+    data: &AppData,
+    candidates: &[vk::Format],
+    tiling: vk::ImageTiling,
+    features: vk::FormatFeatureFlags,
+) -> Result<vk::Format> {
+    candidates
+        .iter()
+        .cloned()
+        .find(|f| unsafe {
+            let properties =
+                instance.get_physical_device_format_properties(data.physical_device, *f);
+
+            match tiling {
+                vk::ImageTiling::LINEAR => properties.linear_tiling_features.contains(features),
+                vk::ImageTiling::OPTIMAL => properties.optimal_tiling_features.contains(features),
+                _ => false,
+            }
+        })
+        .ok_or_else(|| anyhow!("Failed to find supported format"))
+}
+
+unsafe fn get_depth_format(instance: &Instance, data: &AppData) -> Result<vk::Format> {
+    let candidates = &[
+        vk::Format::D32_SFLOAT,
+        vk::Format::D32_SFLOAT_S8_UINT,
+        vk::Format::D24_UNORM_S8_UINT,
+    ];
+
+    unsafe {
+        get_supported_format(
+            instance,
+            data,
+            candidates,
+            vk::ImageTiling::OPTIMAL,
+            vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT,
+        )
+    }
+}
+
+/// # Safety
+/// This is a vulkan function and therfore unsafe
+pub unsafe fn create_depth_objects(
+    instance: &Instance,
+    device: &Device,
+    data: &mut AppData,
+) -> Result<()> {
+    unsafe {
+        let format = get_depth_format(instance, data)?;
+
+        let (depth_image, depth_image_memory) = create_image(
+            instance,
+            device,
+            data,
+            data.swapchain_extent.width,
+            data.swapchain_extent.height,
+            format,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+
+        data.depth_image = depth_image;
+        data.depth_image_memory = depth_image_memory;
+
+        // image view
+
+        data.depth_image_view = create_image_view(
+            device,
+            data.depth_image,
+            format,
+            vk::ImageAspectFlags::DEPTH,
+        )?;
+
+        transition_image_layout(
+            device,
+            data,
+            data.depth_image,
+            format,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        )?;
+
+        // aspect mask and subresource creation
+
+        Ok(())
+    }
 }

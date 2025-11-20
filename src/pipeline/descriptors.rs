@@ -69,7 +69,11 @@ pub unsafe fn create_descriptor_pool(device: &Device, data: &mut AppData) -> Res
         .type_(vk::DescriptorType::UNIFORM_BUFFER)
         .descriptor_count(data.swapchain_images.len() as u32);
 
-    let pool_sizes = &[ubo_size];
+    let sampler_size = vk::DescriptorPoolSize::builder()
+        .type_(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+        .descriptor_count(data.swapchain_images.len() as u32);
+
+    let pool_sizes = &[ubo_size, sampler_size];
     let info = vk::DescriptorPoolCreateInfo::builder()
         .pool_sizes(pool_sizes)
         .max_sets(data.swapchain_images.len() as u32);
@@ -100,7 +104,20 @@ pub unsafe fn create_descriptor_sets(device: &Device, data: &mut AppData) -> Res
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
             .buffer_info(buffer_info);
 
-        device.update_descriptor_sets(&[ubo_write], &[] as &[vk::CopyDescriptorSet]);
+        let info = vk::DescriptorImageInfo::builder()
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            .image_view(data.texture_image_view)
+            .sampler(data.texture_sampler);
+
+        let image_info = &[info];
+        let sampler_write = vk::WriteDescriptorSet::builder()
+            .dst_set(data.descriptor_sets[i])
+            .dst_binding(1)
+            .dst_array_element(0)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .image_info(image_info);
+
+        device.update_descriptor_sets(&[ubo_write, sampler_write], &[] as &[vk::CopyDescriptorSet]);
     }
 
     Ok(())
@@ -122,14 +139,33 @@ pub unsafe fn update_uniform_buffer(
         vec3(0.0, 0.0, 1.0),
     );
 
-    let mut proj = cgmath::perspective(
-        Deg(45.0),
-        data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32,
-        0.1,
-        10.0,
+    let correction = Mat4::new(
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        // flpping the y-axis with this lines -1.0
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0 / 2.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0 / 2.0,
+        1.0,
     );
 
-    proj[1][1] *= -1.0;
+    let mut proj = correction
+        * cgmath::perspective(
+            Deg(45.0),
+            data.swapchain_extent.width as f32 / data.swapchain_extent.height as f32,
+            0.1,
+            10.0,
+        );
 
     // create the ubo object
     let ubo = UniformBufferObject { model, view, proj };

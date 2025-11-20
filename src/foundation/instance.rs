@@ -44,7 +44,6 @@ extern "system" fn debug_callback(
     vk::FALSE
 }
 
-// function that creates the instance
 pub unsafe fn create_instance(
     window: &Window,
     entry: &Entry,

@@ -4,7 +4,7 @@ use vulkanalia::{
     vk::{self, DeviceV1_0, HasBuilder},
 };
 
-use crate::app::AppData;
+use crate::{app::AppData, pipeline::image::create_image_view};
 
 pub unsafe fn create_texture_sampler(device: &Device, data: &mut AppData) -> Result<()> {
     let info = vk::SamplerCreateInfo::builder()
@@ -28,20 +28,17 @@ pub unsafe fn create_texture_sampler(device: &Device, data: &mut AppData) -> Res
     Ok(())
 }
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn create_texture_image_view(device: &Device, data: &mut AppData) -> Result<()> {
-    let subresource_range = vk::ImageSubresourceRange::builder()
-        .aspect_mask(vk::ImageAspectFlags::COLOR)
-        .base_mip_level(0)
-        .level_count(1)
-        .base_array_layer(0)
-        .layer_count(1);
+    data.texture_image_view = unsafe {
+        create_image_view(
+            device,
+            data.texture_image,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageAspectFlags::COLOR,
+        )?
+    };
 
-    let info = vk::ImageViewCreateInfo::builder()
-        .image(data.texture_image)
-        .view_type(vk::ImageViewType::_2D)
-        .format(vk::Format::R8G8B8A8_SRGB)
-        .subresource_range(subresource_range);
-
-    data.texture_image_view = device.create_image_view(&info, None)?;
     Ok(())
 }

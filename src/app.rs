@@ -21,7 +21,7 @@ use crate::pipeline::descriptors::{
     create_descriptor_pool, create_descriptor_set_layout, create_descriptor_sets,
     create_uniform_buffers, update_uniform_buffer,
 };
-use crate::pipeline::image::create_texture_image;
+use crate::pipeline::image::{create_depth_objects, create_texture_image};
 use crate::pipeline::render::create_sync_objects;
 use crate::pipeline::texture::{create_texture_image_view, create_texture_sampler};
 use crate::pipeline::vertex::{create_index_buffer, create_vertex_buffer};
@@ -43,37 +43,44 @@ pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 impl App {
     /// Creates the vulkan application
     pub unsafe fn create(window: &Window) -> Result<Self> {
-        let loader = LibloadingLoader::new(LIBRARY)?;
+        let loader = unsafe { LibloadingLoader::new(LIBRARY)? };
         let entry = Entry::new(loader).map_err(|b| anyhow!("{}", b))?;
         let mut data = AppData::default();
 
-        let instance = create_instance(window, &entry, &mut data)?;
-        data.surface = vk_window::create_surface(&instance, &window, &window)?;
-        pick_physical_device(&instance, &mut data)?;
+        let instance = unsafe { create_instance(window, &entry, &mut data)? };
 
-        let device = create_logical_device(&entry, &instance, &mut data)?;
-        create_swapchain(window, &instance, &device, &mut data)?;
-        create_swapchain_image_views(&device, &mut data)?;
+        unsafe {
+            data.surface = vk_window::create_surface(&instance, &window, &window)?;
+            pick_physical_device(&instance, &mut data)?;
+        }
 
-        create_render_pass(&instance, &device, &mut data)?;
-        create_descriptor_set_layout(&device, &mut data)?;
-        create_pipeline(&device, &mut data)?;
-        create_framebuffers(&device, &mut data)?;
-        create_command_pool(&instance, &device, &mut data)?;
+        let device = unsafe { create_logical_device(&entry, &instance, &mut data)? };
 
-        create_texture_image(&instance, &device, &mut data)?;
-        create_texture_image_view(&device, &mut data)?;
-        create_texture_sampler(&device, &mut data)?;
+        unsafe {
+            create_swapchain(window, &instance, &device, &mut data)?;
+            create_swapchain_image_views(&device, &mut data)?;
 
-        create_vertex_buffer(&instance, &device, &mut data)?;
-        create_index_buffer(&instance, &device, &mut data)?;
+            create_render_pass(&instance, &device, &mut data)?;
+            create_descriptor_set_layout(&device, &mut data)?;
+            create_pipeline(&device, &mut data)?;
+            create_framebuffers(&device, &mut data)?;
+            create_command_pool(&instance, &device, &mut data)?;
+            create_depth_objects(&instance, &device, &mut data)?;
 
-        create_uniform_buffers(&instance, &device, &mut data)?;
-        create_descriptor_pool(&device, &mut data)?;
-        create_descriptor_sets(&device, &mut data)?;
+            create_texture_image(&instance, &device, &mut data)?;
+            create_texture_image_view(&device, &mut data)?;
+            create_texture_sampler(&device, &mut data)?;
 
-        create_command_buffers(&device, &mut data)?;
-        create_sync_objects(&device, &mut data)?;
+            create_vertex_buffer(&instance, &device, &mut data)?;
+            create_index_buffer(&instance, &device, &mut data)?;
+
+            create_uniform_buffers(&instance, &device, &mut data)?;
+            create_descriptor_pool(&device, &mut data)?;
+            create_descriptor_sets(&device, &mut data)?;
+
+            create_command_buffers(&device, &mut data)?;
+            create_sync_objects(&device, &mut data)?;
+        }
 
         Ok(Self {
             entry,
@@ -303,4 +310,7 @@ pub struct AppData {
     pub texture_image_memory: vk::DeviceMemory,
     pub texture_image_view: vk::ImageView,
     pub texture_sampler: vk::Sampler,
+    pub depth_image: vk::Image,
+    pub depth_image_memory: vk::DeviceMemory,
+    pub depth_image_view: vk::ImageView,
 }
