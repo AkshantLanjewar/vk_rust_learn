@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
-use std::mem::size_of;
+use std::hash::Hasher;
 use std::ptr::copy_nonoverlapping as memcpy;
+use std::{hash::Hash, mem::size_of};
 
 use cgmath::{vec2, vec3};
 use vulkanalia::{
@@ -19,9 +20,9 @@ pub type Vec3 = cgmath::Vector3<f32>;
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct Vertex {
-    pos: Vec3,
-    color: Vec3,
-    tex_coord: Vec2,
+    pub pos: Vec3,
+    pub color: Vec3,
+    pub tex_coord: Vec2,
 }
 
 impl Vertex {
@@ -67,18 +68,26 @@ impl Vertex {
     }
 }
 
-pub static VERTICES: [Vertex; 8] = [
-    Vertex::new(vec3(-0.5, -0.5, 0.0), vec3(1.0, 0.0, 0.0), vec2(1.0, 0.0)),
-    Vertex::new(vec3(0.5, -0.5, 0.0), vec3(0.0, 1.0, 0.0), vec2(0.0, 0.0)),
-    Vertex::new(vec3(0.5, 0.5, 0.0), vec3(0.0, 0.0, 1.0), vec2(0.0, 1.0)),
-    Vertex::new(vec3(-0.5, 0.5, 0.0), vec3(1.0, 1.0, 1.0), vec2(1.0, 1.0)),
-    Vertex::new(vec3(-0.5, -0.5, -0.5), vec3(1.0, 0.0, 0.0), vec2(1.0, 0.0)),
-    Vertex::new(vec3(0.5, -0.5, -0.5), vec3(0.0, 1.0, 0.0), vec2(0.0, 0.0)),
-    Vertex::new(vec3(0.5, 0.5, -0.5), vec3(0.0, 0.0, 1.0), vec2(0.0, 1.0)),
-    Vertex::new(vec3(-0.5, 0.5, -0.5), vec3(1.0, 1.0, 1.0), vec2(1.0, 1.0)),
-];
+impl PartialEq for Vertex {
+    fn eq(&self, other: &Self) -> bool {
+        self.pos == other.pos && self.color == other.color && self.tex_coord == other.tex_coord
+    }
+}
 
-pub const SQ_INDICES: &[u16] = &[0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
+impl Eq for Vertex {}
+
+impl Hash for Vertex {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.pos[0].to_bits().hash(state);
+        self.pos[1].to_bits().hash(state);
+        self.pos[2].to_bits().hash(state);
+        self.color[0].to_bits().hash(state);
+        self.color[1].to_bits().hash(state);
+        self.color[2].to_bits().hash(state);
+        self.tex_coord[0].to_bits().hash(state);
+        self.tex_coord[1].to_bits().hash(state);
+    }
+}
 
 pub unsafe fn get_memory_type_index(
     instance: &Instance,
@@ -126,6 +135,8 @@ pub unsafe fn create_buffer(
     Ok((buffer, buffer_memory))
 }
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn copy_buffer(
     device: &Device,
     data: &AppData,
@@ -143,80 +154,90 @@ pub unsafe fn copy_buffer(
     Ok(())
 }
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn create_index_buffer(
     instance: &Instance,
     device: &Device,
     data: &mut AppData,
 ) -> Result<()> {
-    let size = (size_of::<u16>() * SQ_INDICES.len()) as u64;
+    unsafe {
+        let size = (size_of::<u32>() * data.indices.len()) as u64;
 
-    let (staging_buffer, staging_buffer_memory) = create_buffer(
-        instance,
-        device,
-        data,
-        size,
-        vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-    )?;
+        let (staging_buffer, staging_buffer_memory) = create_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        )?;
 
-    let memory = device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
-    memcpy(SQ_INDICES.as_ptr(), memory.cast(), SQ_INDICES.len());
-    device.unmap_memory(staging_buffer_memory);
+        let memory =
+            device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
+        memcpy(data.indices.as_ptr(), memory.cast(), data.indices.len());
+        device.unmap_memory(staging_buffer_memory);
 
-    let (index_buffer, index_buffer_memory) = create_buffer(
-        instance,
-        device,
-        data,
-        size,
-        vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-    )?;
+        let (index_buffer, index_buffer_memory) = create_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
 
-    data.index_buffer = index_buffer;
-    data.index_buffer_memory = index_buffer_memory;
+        data.index_buffer = index_buffer;
+        data.index_buffer_memory = index_buffer_memory;
 
-    copy_buffer(device, data, staging_buffer, index_buffer, size)?;
+        copy_buffer(device, data, staging_buffer, index_buffer, size)?;
 
-    device.destroy_buffer(staging_buffer, None);
-    device.free_memory(staging_buffer_memory, None);
+        device.destroy_buffer(staging_buffer, None);
+        device.free_memory(staging_buffer_memory, None);
+    }
 
     Ok(())
 }
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn create_vertex_buffer(
     instance: &Instance,
     device: &Device,
     data: &mut AppData,
 ) -> Result<()> {
-    let size = (size_of::<Vertex>() * VERTICES.len()) as u64;
-    let (staging_buffer, staging_buffer_memory) = create_buffer(
-        instance,
-        device,
-        data,
-        size,
-        vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-    )?;
+    unsafe {
+        let size = (size_of::<Vertex>() * data.vertices.len()) as u64;
+        let (staging_buffer, staging_buffer_memory) = create_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        )?;
 
-    let memory = device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
-    memcpy(VERTICES.as_ptr(), memory.cast(), VERTICES.len());
-    device.unmap_memory(staging_buffer_memory);
+        let memory =
+            device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
+        memcpy(data.vertices.as_ptr(), memory.cast(), data.vertices.len());
+        device.unmap_memory(staging_buffer_memory);
 
-    let (vertex_buffer, vertex_buffer_memory) = create_buffer(
-        instance,
-        device,
-        data,
-        size,
-        vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-    )?;
+        let (vertex_buffer, vertex_buffer_memory) = create_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
 
-    data.vertex_buffer = vertex_buffer;
-    data.vertex_buffer_memory = vertex_buffer_memory;
+        data.vertex_buffer = vertex_buffer;
+        data.vertex_buffer_memory = vertex_buffer_memory;
 
-    copy_buffer(device, data, staging_buffer, vertex_buffer, size)?;
-    device.destroy_buffer(staging_buffer, None);
-    device.free_memory(staging_buffer_memory, None);
+        copy_buffer(device, data, staging_buffer, vertex_buffer, size)?;
+        device.destroy_buffer(staging_buffer, None);
+        device.free_memory(staging_buffer_memory, None);
+    }
 
     Ok(())
 }

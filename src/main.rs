@@ -12,6 +12,7 @@ use crate::app::App;
 pub mod app;
 pub mod foundation;
 pub mod pipeline;
+pub mod scenes;
 
 fn main() -> Result<()> {
     pretty_env_logger::init();

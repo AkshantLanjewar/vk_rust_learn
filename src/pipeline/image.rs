@@ -13,14 +13,18 @@ use crate::{
         buffers::{begin_onetime_command, end_onetime_command},
         vertex::{create_buffer, get_memory_type_index},
     },
+    scenes::mipmaps::generate_mipmaps,
 };
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn create_image(
     instance: &Instance,
     device: &Device,
     data: &AppData,
     width: u32,
     height: u32,
+    mip_levels: u32,
     format: vk::Format,
     tiling: vk::ImageTiling,
     usage: vk::ImageUsageFlags,
@@ -33,7 +37,7 @@ pub unsafe fn create_image(
             height,
             depth: 1,
         })
-        .mip_levels(1)
+        .mip_levels(mip_levels)
         .array_layers(1)
         .format(format)
         .tiling(tiling)
@@ -60,12 +64,14 @@ pub unsafe fn create_image(
     Ok((image, image_memory))
 }
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn create_texture_image(
     instance: &Instance,
     device: &Device,
     data: &mut AppData,
 ) -> Result<()> {
-    let image = File::open("textures/texture.png")?;
+    let image = File::open("textures/viking_room.png")?;
     let decoder = png::Decoder::new(image);
     let mut reader = decoder.read_info()?;
 
@@ -75,70 +81,91 @@ pub unsafe fn create_texture_image(
     let size = reader.info().raw_bytes() as u64;
     let (width, height) = reader.info().size();
 
-    let (staging_buffer, staging_buffer_memory) = create_buffer(
-        instance,
-        device,
-        data,
-        size,
-        vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
-    )?;
+    data.mip_levels = (width.max(height) as f32).log2().floor() as u32 + 1;
 
-    let memory = device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
-    memcpy(pixels.as_ptr(), memory.cast(), pixels.len());
-    device.unmap_memory(staging_buffer_memory);
+    unsafe {
+        let (staging_buffer, staging_buffer_memory) = create_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        )?;
 
-    println!("here");
+        let memory =
+            device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
+        memcpy(pixels.as_ptr(), memory.cast(), pixels.len());
+        device.unmap_memory(staging_buffer_memory);
 
-    // create the vulkan image object to store the image data
-    let (texture_image, texture_image_memory) = create_image(
-        instance,
-        device,
-        data,
-        width,
-        height,
-        vk::Format::R8G8B8A8_SRGB,
-        vk::ImageTiling::OPTIMAL,
-        vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-    )?;
+        // create the vulkan image object to store the image data
+        let (texture_image, texture_image_memory) = create_image(
+            instance,
+            device,
+            data,
+            width,
+            height,
+            data.mip_levels,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::SAMPLED
+                | vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
 
-    data.texture_image = texture_image;
-    data.texture_image_memory = texture_image_memory;
+        data.texture_image = texture_image;
+        data.texture_image_memory = texture_image_memory;
 
-    transition_image_layout(
-        device,
-        data,
-        data.texture_image,
-        vk::Format::R8G8B8A8_SRGB,
-        vk::ImageLayout::UNDEFINED,
-        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-    )?;
+        transition_image_layout(
+            device,
+            data,
+            data.texture_image,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            data.mip_levels,
+        )?;
 
-    copy_buffer_to_image(
-        device,
-        data,
-        staging_buffer,
-        data.texture_image,
-        width,
-        height,
-    )?;
+        copy_buffer_to_image(
+            device,
+            data,
+            staging_buffer,
+            data.texture_image,
+            width,
+            height,
+        )?;
 
-    transition_image_layout(
-        device,
-        data,
-        data.texture_image,
-        vk::Format::R8G8B8A8_SRGB,
-        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-    )?;
+        transition_image_layout(
+            device,
+            data,
+            data.texture_image,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            data.mip_levels,
+        )?;
 
-    device.destroy_buffer(staging_buffer, None);
-    device.free_memory(staging_buffer_memory, None);
+        device.destroy_buffer(staging_buffer, None);
+        device.free_memory(staging_buffer_memory, None);
+
+        generate_mipmaps(
+            instance,
+            device,
+            data,
+            data.texture_image,
+            vk::Format::R8G8B8A8_SRGB,
+            width,
+            height,
+            data.mip_levels,
+        )?;
+    }
 
     Ok(())
 }
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn copy_buffer_to_image(
     device: &Device,
     data: &AppData,
@@ -147,35 +174,37 @@ pub unsafe fn copy_buffer_to_image(
     width: u32,
     height: u32,
 ) -> Result<()> {
-    let command_buffer = begin_onetime_command(device, data)?;
+    unsafe {
+        let command_buffer = begin_onetime_command(device, data)?;
 
-    let subresource = vk::ImageSubresourceLayers::builder()
-        .aspect_mask(vk::ImageAspectFlags::COLOR)
-        .mip_level(0)
-        .base_array_layer(0)
-        .layer_count(1);
+        let subresource = vk::ImageSubresourceLayers::builder()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .mip_level(0)
+            .base_array_layer(0)
+            .layer_count(1);
 
-    let region = vk::BufferImageCopy::builder()
-        .buffer_offset(0)
-        .buffer_row_length(0)
-        .buffer_image_height(0)
-        .image_subresource(subresource)
-        .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
-        .image_extent(vk::Extent3D {
-            width,
-            height,
-            depth: 1,
-        });
+        let region = vk::BufferImageCopy::builder()
+            .buffer_offset(0)
+            .buffer_row_length(0)
+            .buffer_image_height(0)
+            .image_subresource(subresource)
+            .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
+            .image_extent(vk::Extent3D {
+                width,
+                height,
+                depth: 1,
+            });
 
-    device.cmd_copy_buffer_to_image(
-        command_buffer,
-        buffer,
-        image,
-        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        &[region],
-    );
+        device.cmd_copy_buffer_to_image(
+            command_buffer,
+            buffer,
+            image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[region],
+        );
 
-    end_onetime_command(device, data, command_buffer)?;
+        end_onetime_command(device, data, command_buffer)?;
+    }
 
     Ok(())
 }
@@ -187,9 +216,17 @@ pub unsafe fn transition_image_layout(
     format: vk::Format,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
+    mip_levels: u32,
 ) -> Result<()> {
     let (src_access_mask, dst_access_mask, src_stage_mask, dst_stage_mask) =
         match (old_layout, new_layout) {
+            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL) => (
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+            ),
             (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
                 vk::AccessFlags::empty(),
                 vk::AccessFlags::TRANSFER_WRITE,
@@ -207,10 +244,21 @@ pub unsafe fn transition_image_layout(
 
     let command_buffer = begin_onetime_command(device, data)?;
 
+    let aspect_mask = if new_layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
+        match format {
+            vk::Format::D32_SFLOAT_S8_UINT | vk::Format::D24_UNORM_S8_UINT => {
+                vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
+            }
+            _ => vk::ImageAspectFlags::DEPTH,
+        }
+    } else {
+        vk::ImageAspectFlags::COLOR
+    };
+
     let subresource = vk::ImageSubresourceRange::builder()
-        .aspect_mask(vk::ImageAspectFlags::COLOR)
+        .aspect_mask(aspect_mask)
         .base_mip_level(0)
-        .level_count(1)
+        .level_count(mip_levels)
         .base_array_layer(0)
         .layer_count(1);
 
@@ -246,11 +294,12 @@ pub unsafe fn create_image_view(
     image: vk::Image,
     format: vk::Format,
     aspects: vk::ImageAspectFlags,
+    mip_levels: u32,
 ) -> Result<vk::ImageView> {
     let subresource_range = vk::ImageSubresourceRange::builder()
         .aspect_mask(aspects)
         .base_mip_level(0)
-        .level_count(1)
+        .level_count(mip_levels)
         .base_array_layer(0)
         .layer_count(1);
 
@@ -288,7 +337,7 @@ pub unsafe fn get_supported_format(
         .ok_or_else(|| anyhow!("Failed to find supported format"))
 }
 
-unsafe fn get_depth_format(instance: &Instance, data: &AppData) -> Result<vk::Format> {
+pub unsafe fn get_depth_format(instance: &Instance, data: &AppData) -> Result<vk::Format> {
     let candidates = &[
         vk::Format::D32_SFLOAT,
         vk::Format::D32_SFLOAT_S8_UINT,
@@ -322,6 +371,7 @@ pub unsafe fn create_depth_objects(
             data,
             data.swapchain_extent.width,
             data.swapchain_extent.height,
+            1,
             format,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -338,6 +388,7 @@ pub unsafe fn create_depth_objects(
             data.depth_image,
             format,
             vk::ImageAspectFlags::DEPTH,
+            1,
         )?;
 
         transition_image_layout(
@@ -347,6 +398,7 @@ pub unsafe fn create_depth_objects(
             format,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            1,
         )?;
 
         // aspect mask and subresource creation

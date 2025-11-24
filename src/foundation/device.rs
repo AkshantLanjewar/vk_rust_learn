@@ -15,6 +15,7 @@ use crate::foundation::instance::PORTABILITY_MACOS_VERSION;
 use crate::foundation::instance::VALIDATION_ENABLED;
 use crate::foundation::instance::VALIDATION_LAYER;
 use crate::foundation::swapchain::SwapchainSupport;
+use crate::scenes::sampling::get_max_msaa_samples;
 
 pub const DEVICE_EXTENSIONS: &[vk::ExtensionName] = &[vk::KHR_SWAPCHAIN_EXTENSION.name];
 
@@ -34,6 +35,7 @@ pub unsafe fn pick_physical_device(instance: &Instance, data: &mut AppData) -> R
         } else {
             println!("Selected physical device (`{}`).", properties.device_name);
             data.physical_device = physical_device;
+            data.msaa_samples = get_max_msaa_samples(instance, data);
             return Ok(());
         }
     }

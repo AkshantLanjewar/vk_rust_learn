@@ -4,18 +4,16 @@ use vulkanalia::{
     vk::{self, DeviceV1_0, Handle, HasBuilder},
 };
 
-use crate::{
-    app::AppData,
-    foundation::device::QueueFamilyIndices,
-    pipeline::vertex::{SQ_INDICES, VERTICES},
-};
+use crate::{app::AppData, foundation::device::QueueFamilyIndices};
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn create_framebuffers(device: &Device, data: &mut AppData) -> Result<()> {
     data.framebuffers = data
         .swapchain_image_views
         .iter()
         .map(|i| {
-            let attachments = &[*i];
+            let attachments = &[*i, data.depth_image_view];
             let create_info = vk::FramebufferCreateInfo::builder()
                 .render_pass(data.render_pass)
                 .attachments(attachments)
@@ -30,6 +28,8 @@ pub unsafe fn create_framebuffers(device: &Device, data: &mut AppData) -> Result
     Ok(())
 }
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn create_command_pool(
     instance: &Instance,
     device: &Device,
@@ -44,61 +44,77 @@ pub unsafe fn create_command_pool(
     Ok(())
 }
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Result<()> {
-    let allocate_info = vk::CommandBufferAllocateInfo::builder()
-        .command_pool(data.command_pool)
-        .level(vk::CommandBufferLevel::PRIMARY)
-        .command_buffer_count(data.framebuffers.len() as u32);
+    unsafe {
+        let allocate_info = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(data.command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(data.framebuffers.len() as u32);
 
-    data.command_buffers = device.allocate_command_buffers(&allocate_info)?;
-    for (i, command_buffer) in data.command_buffers.iter().enumerate() {
-        let inheritance = vk::CommandBufferInheritanceInfo::builder();
-        let info = vk::CommandBufferBeginInfo::builder()
-            .flags(vk::CommandBufferUsageFlags::empty())
-            .inheritance_info(&inheritance);
+        data.command_buffers = device.allocate_command_buffers(&allocate_info)?;
+        for (i, command_buffer) in data.command_buffers.iter().enumerate() {
+            let inheritance = vk::CommandBufferInheritanceInfo::builder();
+            let info = vk::CommandBufferBeginInfo::builder()
+                .flags(vk::CommandBufferUsageFlags::empty())
+                .inheritance_info(&inheritance);
 
-        device.begin_command_buffer(*command_buffer, &info)?;
+            device.begin_command_buffer(*command_buffer, &info)?;
 
-        let render_area = vk::Rect2D::builder()
-            .offset(vk::Offset2D::default())
-            .extent(data.swapchain_extent);
+            let render_area = vk::Rect2D::builder()
+                .offset(vk::Offset2D::default())
+                .extent(data.swapchain_extent);
 
-        let color_clear_value = vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 1.0],
-            },
-        };
+            let color_clear_value = vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            };
 
-        let clear_values = &[color_clear_value];
-        let info = vk::RenderPassBeginInfo::builder()
-            .render_pass(data.render_pass)
-            .framebuffer(data.framebuffers[i])
-            .render_area(render_area)
-            .clear_values(clear_values);
+            let depth_clear_value = vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            };
 
-        device.cmd_begin_render_pass(*command_buffer, &info, vk::SubpassContents::INLINE);
-        device.cmd_bind_pipeline(
-            *command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            data.pipeline,
-        );
+            let clear_values = &[color_clear_value, depth_clear_value];
+            let info = vk::RenderPassBeginInfo::builder()
+                .render_pass(data.render_pass)
+                .framebuffer(data.framebuffers[i])
+                .render_area(render_area)
+                .clear_values(clear_values);
 
-        device.cmd_bind_vertex_buffers(*command_buffer, 0, &[data.vertex_buffer], &[0]);
-        device.cmd_bind_index_buffer(*command_buffer, data.index_buffer, 0, vk::IndexType::UINT16);
+            device.cmd_begin_render_pass(*command_buffer, &info, vk::SubpassContents::INLINE);
+            device.cmd_bind_pipeline(
+                *command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                data.pipeline,
+            );
 
-        device.cmd_bind_descriptor_sets(
-            *command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            data.pipeline_layout,
-            0,
-            &[data.descriptor_sets[i]],
-            &[],
-        );
+            device.cmd_bind_vertex_buffers(*command_buffer, 0, &[data.vertex_buffer], &[0]);
+            device.cmd_bind_index_buffer(
+                *command_buffer,
+                data.index_buffer,
+                0,
+                vk::IndexType::UINT32,
+            );
 
-        device.cmd_draw_indexed(*command_buffer, SQ_INDICES.len() as u32, 1, 0, 0, 0);
+            device.cmd_bind_descriptor_sets(
+                *command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                data.pipeline_layout,
+                0,
+                &[data.descriptor_sets[i]],
+                &[],
+            );
 
-        device.cmd_end_render_pass(*command_buffer);
-        device.end_command_buffer(*command_buffer)?;
+            device.cmd_draw_indexed(*command_buffer, data.indices.len() as u32, 1, 0, 0, 0);
+
+            device.cmd_end_render_pass(*command_buffer);
+            device.end_command_buffer(*command_buffer)?;
+        }
     }
 
     Ok(())

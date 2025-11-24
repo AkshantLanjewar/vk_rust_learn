@@ -24,8 +24,9 @@ use crate::pipeline::descriptors::{
 use crate::pipeline::image::{create_depth_objects, create_texture_image};
 use crate::pipeline::render::create_sync_objects;
 use crate::pipeline::texture::{create_texture_image_view, create_texture_sampler};
-use crate::pipeline::vertex::{create_index_buffer, create_vertex_buffer};
+use crate::pipeline::vertex::{Vertex, create_index_buffer, create_vertex_buffer};
 use crate::pipeline::{create_pipeline, create_render_pass};
+use crate::scenes::models::load_model;
 
 #[derive(Clone, Debug)]
 pub struct App {
@@ -63,14 +64,15 @@ impl App {
             create_render_pass(&instance, &device, &mut data)?;
             create_descriptor_set_layout(&device, &mut data)?;
             create_pipeline(&device, &mut data)?;
-            create_framebuffers(&device, &mut data)?;
             create_command_pool(&instance, &device, &mut data)?;
             create_depth_objects(&instance, &device, &mut data)?;
+            create_framebuffers(&device, &mut data)?;
 
             create_texture_image(&instance, &device, &mut data)?;
             create_texture_image_view(&device, &mut data)?;
             create_texture_sampler(&device, &mut data)?;
 
+            load_model(&mut data)?;
             create_vertex_buffer(&instance, &device, &mut data)?;
             create_index_buffer(&instance, &device, &mut data)?;
 
@@ -93,26 +95,31 @@ impl App {
         })
     }
 
+    /// # Safety
+    /// This is a vulkan using function and thus is unsafe
     pub unsafe fn recreate_swapchain(&mut self, window: &Window) -> Result<()> {
-        self.device.device_wait_idle()?;
-        self.device.destroy_buffer(self.data.vertex_buffer, None);
-        self.destroy_swapchain();
+        unsafe {
+            self.device.device_wait_idle()?;
+            self.device.destroy_buffer(self.data.vertex_buffer, None);
+            self.destroy_swapchain();
 
-        // recreate the swapchain
-        create_swapchain(window, &self.instance, &self.device, &mut self.data)?;
-        create_swapchain_image_views(&self.device, &mut self.data)?;
-        create_render_pass(&self.instance, &self.device, &mut self.data)?;
-        create_descriptor_set_layout(&self.device, &mut self.data)?;
-        create_pipeline(&self.device, &mut self.data)?;
+            // recreate the swapchain
+            create_swapchain(window, &self.instance, &self.device, &mut self.data)?;
+            create_swapchain_image_views(&self.device, &mut self.data)?;
+            create_render_pass(&self.instance, &self.device, &mut self.data)?;
+            create_descriptor_set_layout(&self.device, &mut self.data)?;
+            create_pipeline(&self.device, &mut self.data)?;
 
-        create_framebuffers(&self.device, &mut self.data)?;
-        create_vertex_buffer(&self.instance, &self.device, &mut self.data);
-        create_index_buffer(&self.instance, &self.device, &mut self.data);
+            create_depth_objects(&self.instance, &self.device, &mut self.data)?;
+            create_framebuffers(&self.device, &mut self.data)?;
+            create_vertex_buffer(&self.instance, &self.device, &mut self.data)?;
+            create_index_buffer(&self.instance, &self.device, &mut self.data)?;
 
-        create_uniform_buffers(&self.instance, &self.device, &mut self.data)?;
-        create_descriptor_pool(&self.device, &mut self.data)?;
-        create_descriptor_sets(&self.device, &mut self.data)?;
-        create_command_buffers(&self.device, &mut self.data)?;
+            create_uniform_buffers(&self.instance, &self.device, &mut self.data)?;
+            create_descriptor_pool(&self.device, &mut self.data)?;
+            create_descriptor_sets(&self.device, &mut self.data)?;
+            create_command_buffers(&self.device, &mut self.data)?;
+        }
 
         self.data
             .images_in_flight
@@ -122,34 +129,41 @@ impl App {
     }
 
     unsafe fn destroy_swapchain(&mut self) {
-        self.device
-            .destroy_descriptor_pool(self.data.descriptor_pool, None);
+        unsafe {
+            self.device
+                .destroy_image_view(self.data.depth_image_view, None);
+            self.device.free_memory(self.data.depth_image_memory, None);
+            self.device.destroy_image(self.data.depth_image, None);
 
-        self.data
-            .uniform_buffers
-            .iter()
-            .for_each(|b| self.device.destroy_buffer(*b, None));
-        self.data
-            .uniform_buffers_memory
-            .iter()
-            .for_each(|m| self.device.free_memory(*m, None));
+            self.device
+                .destroy_descriptor_pool(self.data.descriptor_pool, None);
 
-        self.data
-            .framebuffers
-            .iter()
-            .for_each(|f| self.device.destroy_framebuffer(*f, None));
+            self.data
+                .uniform_buffers
+                .iter()
+                .for_each(|b| self.device.destroy_buffer(*b, None));
+            self.data
+                .uniform_buffers_memory
+                .iter()
+                .for_each(|m| self.device.free_memory(*m, None));
 
-        self.device
-            .free_command_buffers(self.data.command_pool, &self.data.command_buffers);
-        self.device.destroy_pipeline(self.data.pipeline, None);
-        self.device
-            .destroy_pipeline_layout(self.data.pipeline_layout, None);
-        self.device.destroy_render_pass(self.data.render_pass, None);
-        self.data
-            .swapchain_image_views
-            .iter()
-            .for_each(|v| self.device.destroy_image_view(*v, None));
-        self.device.destroy_swapchain_khr(self.data.swapchain, None);
+            self.data
+                .framebuffers
+                .iter()
+                .for_each(|f| self.device.destroy_framebuffer(*f, None));
+
+            self.device
+                .free_command_buffers(self.data.command_pool, &self.data.command_buffers);
+            self.device.destroy_pipeline(self.data.pipeline, None);
+            self.device
+                .destroy_pipeline_layout(self.data.pipeline_layout, None);
+            self.device.destroy_render_pass(self.data.render_pass, None);
+            self.data
+                .swapchain_image_views
+                .iter()
+                .for_each(|v| self.device.destroy_image_view(*v, None));
+            self.device.destroy_swapchain_khr(self.data.swapchain, None);
+        }
     }
 
     /// renders the frame for the vulkan application
@@ -298,6 +312,8 @@ pub struct AppData {
     pub render_finished_semaphore: Vec<vk::Semaphore>,
     pub in_flight_fences: Vec<vk::Fence>,
     pub images_in_flight: Vec<vk::Fence>,
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
     pub vertex_buffer: vk::Buffer,
     pub vertex_buffer_memory: vk::DeviceMemory,
     pub index_buffer: vk::Buffer,
@@ -306,6 +322,7 @@ pub struct AppData {
     pub uniform_buffers_memory: Vec<vk::DeviceMemory>,
     pub descriptor_pool: vk::DescriptorPool,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
+    pub mip_levels: u32,
     pub texture_image: vk::Image,
     pub texture_image_memory: vk::DeviceMemory,
     pub texture_image_view: vk::ImageView,
@@ -313,4 +330,8 @@ pub struct AppData {
     pub depth_image: vk::Image,
     pub depth_image_memory: vk::DeviceMemory,
     pub depth_image_view: vk::ImageView,
+    pub msaa_samples: vk::SampleCountFlags,
+    pub color_image: vk::Image,
+    pub color_image_memory: vk::DeviceMemory,
+    pub color_image_view: vk::ImageView,
 }

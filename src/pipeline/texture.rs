@@ -6,6 +6,8 @@ use vulkanalia::{
 
 use crate::{app::AppData, pipeline::image::create_image_view};
 
+/// # Safety
+/// This is a vulkan using function and thus is unsafe
 pub unsafe fn create_texture_sampler(device: &Device, data: &mut AppData) -> Result<()> {
     let info = vk::SamplerCreateInfo::builder()
         .mag_filter(vk::Filter::LINEAR)
@@ -22,7 +24,7 @@ pub unsafe fn create_texture_sampler(device: &Device, data: &mut AppData) -> Res
         .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
         .mip_lod_bias(0.0)
         .min_lod(0.0)
-        .max_lod(0.0);
+        .max_lod(data.mip_levels as f32);
 
     data.texture_sampler = device.create_sampler(&info, None)?;
     Ok(())
@@ -37,6 +39,7 @@ pub unsafe fn create_texture_image_view(device: &Device, data: &mut AppData) -> 
             data.texture_image,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageAspectFlags::COLOR,
+            data.mip_levels,
         )?
     };
 
