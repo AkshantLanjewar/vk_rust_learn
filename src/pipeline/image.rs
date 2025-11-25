@@ -25,6 +25,7 @@ pub unsafe fn create_image(
     width: u32,
     height: u32,
     mip_levels: u32,
+    samples: vk::SampleCountFlags,
     format: vk::Format,
     tiling: vk::ImageTiling,
     usage: vk::ImageUsageFlags,
@@ -44,7 +45,7 @@ pub unsafe fn create_image(
         .initial_layout(vk::ImageLayout::UNDEFINED)
         .usage(usage)
         .sharing_mode(vk::SharingMode::EXCLUSIVE)
-        .samples(vk::SampleCountFlags::_1)
+        .samples(samples)
         .flags(vk::ImageCreateFlags::empty());
 
     let image = device.create_image(&info, None)?;
@@ -106,6 +107,7 @@ pub unsafe fn create_texture_image(
             width,
             height,
             data.mip_levels,
+            vk::SampleCountFlags::_1,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::SAMPLED
@@ -372,6 +374,7 @@ pub unsafe fn create_depth_objects(
             data.swapchain_extent.width,
             data.swapchain_extent.height,
             1,
+            data.msaa_samples,
             format,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,

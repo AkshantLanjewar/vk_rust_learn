@@ -14,7 +14,6 @@ pub type Mat4 = cgmath::Matrix4<f32>;
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct UniformBufferObject {
-    model: Mat4,
     view: Mat4,
     proj: Mat4,
 }
@@ -132,9 +131,8 @@ pub unsafe fn update_uniform_buffer(
     let time = start.elapsed().as_secs_f32();
 
     // create the model view projection matrices
-    let model = Mat4::from_axis_angle(vec3(0.0, 0.0, 1.0), Deg(90.0) * time);
     let view = Mat4::look_at_rh(
-        point3(2.0, 2.0, 2.0),
+        point3(6.0, 0.0, 2.0),
         point3(0.0, 0.0, 0.0),
         vec3(0.0, 0.0, 1.0),
     );
@@ -168,7 +166,7 @@ pub unsafe fn update_uniform_buffer(
         );
 
     // create the ubo object
-    let ubo = UniformBufferObject { model, view, proj };
+    let ubo = UniformBufferObject { view, proj };
 
     // copy the memory into the uniform buffer that is active
     let memory = device.map_memory(

@@ -2,8 +2,9 @@ use anyhow::Result;
 use vulkanalia::vk::DeviceV1_0;
 use winit::{
     dpi::LogicalSize,
-    event::{Event, WindowEvent},
+    event::{ElementState, Event, WindowEvent},
     event_loop::EventLoop,
+    keyboard::{KeyCode, PhysicalKey},
     window::WindowBuilder,
 };
 
@@ -53,6 +54,19 @@ fn main() -> Result<()> {
                     } else {
                         minimized = false;
                         app.resized = true;
+                    }
+                }
+                WindowEvent::KeyboardInput { event, .. } => {
+                    if event.state == ElementState::Pressed {
+                        match event.physical_key {
+                            PhysicalKey::Code(KeyCode::ArrowLeft) if app.models > 1 => {
+                                app.models -= 1
+                            }
+                            PhysicalKey::Code(KeyCode::ArrowRight) if app.models < 4 => {
+                                app.models += 1
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 _ => {}
